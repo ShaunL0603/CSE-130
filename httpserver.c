@@ -1,5 +1,5 @@
 // Asgn 4: A simple HTTP server.
-// By:  Andi Quinn
+// By:  Shaun Lagon
 
 #include "connection.h"
 #include "listener_socket.h"
@@ -17,18 +17,25 @@
 
 #include <sys/stat.h>
 
+#define DEFAULT_THREADS 4
+
 void handle_connection(int);
 
 void handle_get(conn_t *);
 void handle_put(conn_t *);
 void handle_unsupported(conn_t *);
+int parse_arguments(int argc, char **argv);
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        warnx("wrong arguments: %s port_num", argv[0]);
-        fprintf(stderr, "usage: %s <port>\n", argv[0]);
-        return EXIT_FAILURE;
+    int threads = parse_arguments(argc, argv);
+    int opt = 0;
+
+    
+    if (threads == -1) {
+      return EXIT_FAILURE;
     }
+
+    (void) threads;
 
     char *endptr = NULL;
     size_t port = (size_t) strtoull(argv[1], &endptr, 10);
@@ -46,12 +53,70 @@ int main(int argc, char **argv) {
 
     while (1) {
         int connfd = ls_accept(sock);
+        if (connfd < 0) continue;
         handle_connection(connfd);
         close(connfd);
     }
     ls_delete(&sock);
 
     return EXIT_SUCCESS;
+}
+
+/*
+ * @brief Helper function using getopt to parse command line arguments
+ * 
+ * @param argc number of arguments passed in
+ * @param argv array of strings of command line arguments
+ * 
+ * @return int where non-negative integer <= 4 is success and indicates the
+ *         number of threads to use, -1 indicates a failure
+*/
+int parse_arguments (int argc, char **argv) {
+    while ((opt = getopt(argc, argv, "t:")) != -1) {
+        switch (opt) {
+            case 't':
+                char *endptr = NULL;
+                long val = strtol(optar, &endptr, 10);
+
+                if (endptr === optarg || *endptr != '\0' || val <= 0) {
+                    fprintf(stderr, "Invalid thread count\n");
+                    return -1;
+                }
+
+                return (int) val;
+            default:
+                fprintf(stderr, "usage: %s [-t threads] <port>\n", argv[0]);
+                return -1;
+        }
+    }
+
+    if (optind != argc - 1) {
+      fprintf(stderr, "usage: %s [-t threads] <port>\n", argv[0]);
+      return -1;
+    }
+}
+
+/*
+ * @brief prints a line to stderr of the of an executed request
+ * 
+ * @param op HTTP operation that was performed
+ * @param uri The uri to a file
+ * @param status_code
+ * @param req_id The optional HTTP header
+*/
+static void audit_log(
+    const char *op,
+    const char *uri,
+    uint16_t status_code,
+    const char *req_id) {
+    
+    const char *id = (req_id != NULL) ? req_id : "0";
+
+    if (uri[0] == '/') {
+      fprintf(stderr, "%s,%s,%u,$s\n", op, uri, status_code, id);
+    } else {
+      fprintf(stderr, "%s,/%s,%u,%s\n", op, uri, status_code, id);
+    }
 }
 
 void handle_connection(int connfd) {
