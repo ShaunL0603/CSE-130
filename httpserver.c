@@ -21,10 +21,16 @@
 
 void handle_connection(int);
 
-void handle_get(conn_t *);
-void handle_put(conn_t *);
-void handle_unsupported(conn_t *);
+static void handle_get(conn_t *);
+static void handle_put(conn_t *);
+static void handle_unsupported(conn_t *);
+
 int parse_arguments(int argc, char **argv);
+static void audit_log(
+  const char *op, const char *uri, uint16_t status_code, const char *req_id
+);
+
+static void handle_get(conn_t *);
 
 int main(int argc, char **argv) {
     int threads = parse_arguments(argc, argv);
@@ -119,27 +125,33 @@ static void audit_log(
     }
 }
 
-void handle_connection(int connfd) {
+// put http handlers in another c file and create h file
+
+static void handle_connection(int connfd) {
 
     conn_t *conn = conn_new(connfd);
+    if (conn == NULL) return;
 
     const Response_t *res = conn_parse(conn);
 
     if (res != NULL) {
         conn_send_response(conn, res);
     } else {
-        printf("%s", conn_str(conn));
+        // printf("%s", conn_str(conn));
         const Request_t *req = conn_get_request(conn);
         if (req == &REQUEST_PUT) {
             handle_put(conn);
+        } else if (req == &REQUEST_GET) {
+            handle_get(conn);
+        } else {
+          conn_send_response(conn, &RESPONSE_NOT_IMPLEMENTED);
         }
-        // add cases for other types of requests here
     }
 
     conn_delete(&conn);
 }
 
-void handle_put(conn_t *conn) {
+static void handle_put(conn_t *conn) {
 
     char *uri = conn_get_uri(conn);
 
@@ -179,4 +191,55 @@ void handle_put(conn_t *conn) {
 
 out:
     conn_send_response(conn, res);
+}
+
+/*
+ * @brief handle the http GET operation using helper functions defined in
+ *        the "connection.h" header file
+ * 
+ * @param connection socket API
+*/
+static void handle_get(conn_t *conn) {
+    const *uri = conn_get_uri(conn);
+    char *req_id = conn_get_header(conn, "Request-Id");
+    const Response_t *res = NULL;
+
+    int fd = open(uri, O_RDONLY);
+    if (fd < 0) {
+        if (errno == ENOENT) {
+            res = &RESPONSE_NOT_FOUND;
+        } else if (errno == ENOENT) {
+            res = &RESPONSE_FORBIDDEN;
+        } else {
+            res = &RESPONSE_INTERNAL_SERVER_ERROR;
+        }
+
+        audit_log("GET", uri, response_get_code(res), req_id);
+        conn_send_response(conn, res);
+        return;
+    }
+
+    // struct to store and contain metadata about a file or directory
+    // from <sys/stat.h> library
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        res = &RESPONSE_INTERNAL_SERVER_ERROR;
+        audit_log("GET", uri, response_get_code(res), req_id);
+        conn_send_response(conn, res);
+        return; 
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+        close(fd);
+        res = &RESPONSE_FORBIDDEN;
+        audit_log("GET", uri, response_get_code(res), req_id);
+        conn_send_response(conn, res);
+        return; 
+    }
+
+    // valid file
+    audit_log("GET", uri, response_get_code(&RESPONSE_OK), req_id);
+    conn_send_file(conn, fd, (uint64_t) st.st_size);
+    close(fd);
 }
