@@ -163,5 +163,5 @@ static void handle_get(conn_t *conn) {
 out:
     audit_log("GET", uri, response_get_code(res), req_id);
     conn_send_response(conn, res);
-    reader_unlock(rw)
+    reader_unlock(rw);
 }
