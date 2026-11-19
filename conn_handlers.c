@@ -1,10 +1,13 @@
 // C file to handle connections
 // By:  Shaun Lagon
 
-#include "handlers.h"
+#include "conn_handlers.h"
 #include "connection.h"
 #include "request.h"
 #include "response.h"
+
+#include "uri_lock.h"
+#include "rwlock.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -68,6 +71,9 @@ static void handle_put(conn_t *conn) {
 
     const Response_t *res = NULL;
 
+    rwlock_t *rw = uri_lock_get(uri);
+    writer_lock(rw);
+
     // Check if file already exists before opening it.
     bool existed = access(uri, F_OK) == 0;
 
@@ -99,10 +105,11 @@ static void handle_put(conn_t *conn) {
     }
 
     close(fd);
-    audit_log("PUT", uri, response_get_code(res), req_id);
     goto out;
 out:
+    audit_log("PUT", uri, response_get_code(res), req_id);
     conn_send_response(conn, res);
+    writer_unlock(rw);
 }
 
 /*
@@ -116,6 +123,9 @@ static void handle_get(conn_t *conn) {
     char *req_id = conn_get_header(conn, "Request-Id");
     const Response_t *res = NULL;
 
+    rwlock_t *rw = uri_lock_get(uri);
+    reader_lock(rw);
+
     int fd = open(uri, O_RDONLY);
     if (fd < 0) {
         if (errno == ENOENT) {
@@ -126,9 +136,7 @@ static void handle_get(conn_t *conn) {
             res = &RESPONSE_INTERNAL_SERVER_ERROR;
         }
 
-        audit_log("GET", uri, response_get_code(res), req_id);
-        conn_send_response(conn, res);
-        return;
+        goto out;
     }
 
     // struct to store and contain metadata about a file or directory
@@ -137,21 +145,23 @@ static void handle_get(conn_t *conn) {
     if (fstat(fd, &st) < 0) {
         close(fd);
         res = &RESPONSE_INTERNAL_SERVER_ERROR;
-        audit_log("GET", uri, response_get_code(res), req_id);
-        conn_send_response(conn, res);
-        return;
+        goto out;
     }
 
     if (S_ISDIR(st.st_mode)) {
         close(fd);
         res = &RESPONSE_FORBIDDEN;
-        audit_log("GET", uri, response_get_code(res), req_id);
-        conn_send_response(conn, res);
-        return;
+        goto out;
     }
 
     // valid file
     audit_log("GET", uri, response_get_code(&RESPONSE_OK), req_id);
     conn_send_file(conn, fd, (uint64_t) st.st_size);
     close(fd);
+    reader_unlock(rw);
+    return;
+out:
+    audit_log("GET", uri, response_get_code(res), req_id);
+    conn_send_response(conn, res);
+    reader_unlock(rw)
 }

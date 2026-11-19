@@ -4,13 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define HASH_SIZE 128
-#define N_WAY 4
+#define HASH_SIZE    128
+#define RWLOCK_N_WAY 4
 
 struct uri_node {
-  char *uri;
-  rwlock_T *rw;
-  struct uri_node *next;  // avoid hash collisons, singly linked list
+    char *uri;
+    rwlock_t *rw;
+    struct uri_node *next; // avoid hash collisons, singly linked list
 };
 
 static uri_node_t *buckets[HASH_SIZE];

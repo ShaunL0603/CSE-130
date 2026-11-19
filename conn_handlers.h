@@ -1,5 +1,5 @@
-#ifndef HANDLERS_H
-#define HANDLERS_H
+#ifndef CONN_HANDLERS_H
+#define CONN_HANDLERS_H
 
 #include <stdint.h>
 

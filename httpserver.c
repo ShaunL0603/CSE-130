@@ -2,15 +2,17 @@
 // By:  Shaun Lagon
 
 #include "listener_socket.h"
-#include "handler.h"
+#include "conn_handlers.h"
+#include "thread_handlers.h"
 #include "uri_lock.h"
 
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+#include <stdint.h>
 
-// void handle_unsupported(conn_t *);
 int parse_arguments(int argc, char **argv);
 
 int main(int argc, char **argv) {
@@ -19,30 +21,67 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    (void) threads;
-
     char *endptr = NULL;
     size_t port = (size_t) strtoull(argv[optind], &endptr, 10);
-    if (endptr == argv[optind] && *endptr != '\0') {
-        fprintf(stderr, "Invalid port number: %s\n", argv[1]);
+    if (endptr == argv[optind] || *endptr != '\0') {
+        fprintf(stderr, "Invalid port number: %s\n", argv[optind]);
         return EXIT_FAILURE;
     }
 
     signal(SIGPIPE, SIG_IGN);
+
+    // Register SIGTERM and SIGINT without SA_RESTART so ls_accept unblocks
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigterm_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+
     Listener_Socket_t *sock = ls_new(port);
     if (!sock) {
         fprintf(stderr, "cannot open socket\n");
         return EXIT_FAILURE;
     }
 
-    while (1) {
+    work_q = queue_new(threads);
+    if (work_q == NULL) {
+        ls_delete(&sock);
+        return EXIT_FAILURE;
+    }
+    uri_lock_init();
+
+    pthread_t *workers = malloc(sizeof(pthread_t) * (size_t) threads);
+    if (workers == NULL) {
+        uri_lock_destroy();
+        queue_delete(&work_q);
+        ls_delete(&sock);
+        return EXIT_FAILURE;
+    }
+
+    if (init_worker_threads(threads, workers) < 0) {
+        uri_lock_destroy();
+        queue_delete(&work_q);
+        ls_delete(&sock);
+        free(workers);
+        fprintf(stderr, "issue creating worker threads\n");
+        return EXIT_FAILURE;
+    }
+
+    while (running) {
         int connfd = ls_accept(sock);
         if (connfd < 0) {
             continue;
         }
-        handle_connection(connfd);
-        close(connfd);
+        queue_push(work_q, (void *) (intptr_t) connfd);
     }
+
+    kill_threads(threads, workers, work_q);
+    fflush(stderr);
+    free(workers);
+    uri_lock_destroy();
+    queue_delete(&work_q);
     ls_delete(&sock);
 
     return EXIT_SUCCESS;

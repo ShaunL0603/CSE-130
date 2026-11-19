@@ -1,7 +1,7 @@
 #ifndef URI_LOCK_H
 #define URI_LOCK_H
 
-#include "rwlock"
+#include "rwlock.h"
 
 /**
  * @struct uri_node_t
