@@ -2,7 +2,8 @@
 // By:  Shaun Lagon
 
 #include "listener_socket.h"
-#include "httpserver.h"
+#include "handler.h"
+#include "uri_lock.h"
 
 #include <signal.h>
 #include <stdio.h>

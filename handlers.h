@@ -1,5 +1,5 @@
-#ifndef HTTPSERVER_H
-#define HTTPSERVER_H
+#ifndef HANDLERS_H
+#define HANDLERS_H
 
 #include <stdint.h>
 
